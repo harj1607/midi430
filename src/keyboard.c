@@ -4,11 +4,11 @@
 #include <msp430.h>
 
 
-static uint8_t keys[KEYBOARD_NB_KEYS/8+1];
-static uint8_t old_keys[KEYBOARD_NB_KEYS/8+1];
+static uint8_t raw_keys[KEYBOARD_NB_KEYS/8+1];
 static uint8_t velocity = MIDI_STANDARD_VELOCITY;
 static uint8_t channel = 1;
 
+static key_t keys[KEYBOARD_NB_KEYS];
 
 void keyboard_init(void)
 {
@@ -27,10 +27,10 @@ void keyboard_init(void)
     /* Delaying waiting for the module to initialize */
 	__delay_cycles(75);
 
-    /* Reset old keys */
-    for (i=0; i<(KEYBOARD_NB_KEYS/8+1); i++)
-    	old_keys[i] = 0x00;
-
+	/* Initialize all keys */
+    for (i=0; i<KEYBOARD_NB_KEYS; ++i) {
+        key_init(&keys[i], i+KEYBOARD_NOTE_OFFSET);
+    }
 }
 
 
@@ -61,11 +61,8 @@ void keyboard_scan(uint8_t *keys, int n)
 void do_keyboard(void)
 {
     int i;
-	uint8_t mask;
-	uint8_t idx;
-	uint8_t bit;
-	uint8_t change;
-	uint8_t note;
+	uint8_t raw_mask;
+	uint8_t raw_idx;
 
 	midi_all_notes_off();
 
@@ -79,38 +76,76 @@ void do_keyboard(void)
 //	        }
 //	    }
 
-	    keyboard_scan(keys, KEYBOARD_NB_KEYS/8+1);
+	    keyboard_scan(raw_keys, KEYBOARD_NB_KEYS/8+1);
 
-	    idx = 0;
+	    raw_idx = 0;
+	    raw_mask = 0x01;
 
-	    for (i=0; i<(KEYBOARD_NB_KEYS/8+1); i++) {
+	    for (i=0; i<KEYBOARD_NB_KEYS; i++) {
 
-	        change = old_keys[idx] ^ keys[idx];
+	        key_t* key = &keys[i];
 
-	        if (change) {
-	            mask = 0x01;
+	        bool pressed = raw_keys[raw_idx] & raw_mask;
 
-	            for (bit=0; bit<8; bit++) {
-	                if (change & mask) {
-	                    note = i*8+bit+KEYBOARD_NOTE_OFFSET;
-
-	                    if (keys[idx] & mask) {
-	                        // Note on
-	                        midi_noteon(channel, note, velocity);
-	                    } else {
-	                        // Note off
-	                        midi_noteoff(channel, note, velocity);
-	                    }
-	                }
-
-	                mask = mask << 1;
-	            }
+	        if (key_update(key, pressed)) {
+                if (key->state == KEY_STATE_ON) {
+	                // Note on
+	                midi_noteon(channel, key->note, velocity);
+	            } else {
+	                // Note off
+	                midi_noteoff(channel, key->note, velocity);
+                }
 			}
 
-	        old_keys[idx] = keys[idx];
-	        idx++;
+	        if (raw_mask == 0x80) {
+	            raw_mask = 0x01;
+	            raw_idx++;
+	        } else {
+	            raw_mask = raw_mask << 1;
+	        }
 	    }
 	}
 }
 
+
+void key_init(key_t* key, uint8_t note)
+{
+    key->count = 0;
+    key->state = KEY_STATE_OFF;
+    key->note = note;
+}
+
+
+bool key_update(key_t* key, bool input)
+{
+    switch (key->state) {
+    case KEY_STATE_OFF:
+        if (input == true) {
+            key->count++;
+            if (key->count >= KEY_DELAY_ON) {
+                key->count = 0;
+                key->state = KEY_STATE_ON;
+            }
+            return true;
+        } else {
+            key->count = 0;
+        }
+        break;
+
+    case KEY_STATE_ON:
+        if (input == false) {
+            key->count++;
+            if (key->count >= KEY_DELAY_OFF) {
+                key->count = 0;
+                key->state = KEY_STATE_OFF;
+                return true;
+            }
+        } else {
+            key->count = 0;
+        }
+        break;
+    }
+
+    return false;
+}
 
