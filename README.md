@@ -4,7 +4,7 @@ This is a MIDI keyboard project for the MSP430G2553.
 
 # Construction
 
-The keyboard is from an 1970's Hammond Romance organ. 
+The keyboard is from a 1970's Hammond Romance organ. 
 
 ## Debounce circuit
 
